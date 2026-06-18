@@ -1,4 +1,4 @@
-# v0.1.0
+# v0.2.16
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 from genlayer import *
 import typing
@@ -14,6 +14,7 @@ class MeritTrial(gl.Contract):
     job_status: TreeMap[u256, str]
     job_evaluation_fee: TreeMap[u256, u256]
     job_challenge_window: TreeMap[u256, u256]
+    job_balance: TreeMap[u256, u256]
     job_count: u256
 
     # ── Candidate Application Storage ────────────────────────────
@@ -32,7 +33,6 @@ class MeritTrial(gl.Contract):
     app_confidence: TreeMap[u256, u256]
     app_created_at: TreeMap[u256, u256]
     app_evaluated_at: TreeMap[u256, u256]
-    app_challenge_deadline: TreeMap[u256, u256]
     app_count: u256
 
     # ── Challenge Storage ────────────────────────────────────────
@@ -40,7 +40,6 @@ class MeritTrial(gl.Contract):
     challenge_reasons: DynArray[str]
     challenge_panel_verdicts: DynArray[str]
     challenge_outcome: DynArray[str]
-    challenge_timestamps: DynArray[u256]
     challenge_count: u256
 
     # ── Treasury / Platform Revenue ──────────────────────────────
@@ -69,6 +68,15 @@ class MeritTrial(gl.Contract):
         evaluation_fee: u256,
         challenge_window_blocks: u256,
     ) -> typing.Any:
+        if len(title) == 0:
+            return "NO_TITLE"
+        if len(description) == 0:
+            return "NO_DESCRIPTION"
+        if len(company) == 0:
+            return "NO_COMPANY"
+        if evaluation_fee == u256(0):
+            return "ZERO_FEE"
+
         job_id = self.job_count
         self.job_titles[job_id] = title
         self.job_descriptions[job_id] = description
@@ -77,8 +85,19 @@ class MeritTrial(gl.Contract):
         self.job_status[job_id] = "OPEN"
         self.job_evaluation_fee[job_id] = evaluation_fee
         self.job_challenge_window[job_id] = challenge_window_blocks
+        self.job_balance[job_id] = u256(0)
         self.job_count = job_id + u256(1)
         return job_id
+
+    @gl.public.write
+    def fund_job(self, job_id: u256, amount: u256) -> str:
+        if job_id >= self.job_count:
+            return "INVALID_ID"
+        if amount == u256(0):
+            return "ZERO_FUNDING"
+
+        self.job_balance[job_id] = self.job_balance[job_id] + amount
+        return "FUNDED"
 
     @gl.public.view
     def get_job(self, job_id: u256) -> str:
@@ -89,6 +108,7 @@ class MeritTrial(gl.Contract):
         status = self.job_status[job_id]
         evaluation_fee = self.job_evaluation_fee[job_id]
         challenge_window = self.job_challenge_window[job_id]
+        balance = self.job_balance[job_id]
         result = json.dumps({
             "job_id": int(job_id),
             "title": title,
@@ -98,6 +118,7 @@ class MeritTrial(gl.Contract):
             "status": status,
             "evaluation_fee": int(evaluation_fee),
             "challenge_window_blocks": int(challenge_window),
+            "balance": int(balance),
         }, sort_keys=True, separators=(",", ":"))
         return result
 
@@ -121,7 +142,6 @@ class MeritTrial(gl.Contract):
         github_url: str,
         portfolio_url: str,
         code_challenge_url: str,
-        cover_letter_url: str,
     ) -> typing.Any:
         if job_id >= self.job_count:
             return "INVALID_ID"
@@ -134,7 +154,6 @@ class MeritTrial(gl.Contract):
             or len(github_url) > 0
             or len(portfolio_url) > 0
             or len(code_challenge_url) > 0
-            or len(cover_letter_url) > 0
         )
         if not has_url:
             return "NO_EVIDENCE_URLS"
@@ -146,7 +165,7 @@ class MeritTrial(gl.Contract):
         self.app_github_url[application_id] = github_url
         self.app_portfolio_url[application_id] = portfolio_url
         self.app_code_challenge_url[application_id] = code_challenge_url
-        self.app_cover_letter_url[application_id] = cover_letter_url
+        self.app_cover_letter_url[application_id] = ""
         self.app_status[application_id] = "PENDING"
         self.app_evaluation_json[application_id] = ""
         self.app_tech_rating[application_id] = u256(0)
@@ -155,9 +174,20 @@ class MeritTrial(gl.Contract):
         self.app_confidence[application_id] = u256(0)
         self.app_created_at[application_id] = u256(0)
         self.app_evaluated_at[application_id] = u256(0)
-        self.app_challenge_deadline[application_id] = u256(0)
         self.app_count = application_id + u256(1)
         return application_id
+
+    @gl.public.write
+    def attach_cover_letter(self, application_id: u256, cover_letter_url: str) -> str:
+        if application_id >= self.app_count:
+            return "INVALID_ID"
+        if self.app_status[application_id] != "PENDING":
+            return "INVALID_STATUS"
+        if len(cover_letter_url) == 0:
+            return "NO_COVER_LETTER_URL"
+
+        self.app_cover_letter_url[application_id] = cover_letter_url
+        return "ATTACHED"
 
     @gl.public.view
     def get_application(self, application_id: u256) -> str:
@@ -176,7 +206,6 @@ class MeritTrial(gl.Contract):
         confidence = self.app_confidence[application_id]
         created_at = self.app_created_at[application_id]
         evaluated_at = self.app_evaluated_at[application_id]
-        challenge_deadline = self.app_challenge_deadline[application_id]
         result = json.dumps({
             "application_id": int(application_id),
             "job_id": int(job_id),
@@ -194,7 +223,6 @@ class MeritTrial(gl.Contract):
             "confidence": int(confidence),
             "created_at": int(created_at),
             "evaluated_at": int(evaluated_at),
-            "challenge_deadline": int(challenge_deadline),
         }, sort_keys=True, separators=(",", ":"))
         return result
 
@@ -292,22 +320,52 @@ class MeritTrial(gl.Contract):
                 "10. confidence: Your confidence in this evaluation (1-10)\n"
                 "11. evidence_summary: What specific evidence supports this rating?\n\n"
                 "Respond with ONLY this JSON, no other text or explanation:\n"
-                '{{{{"technical_rating":N,"skills_match":{{"required":[],"matched":[],"missing":[],"match_percentage":N}},"code_quality":"...","experience_depth":N,"communication":N,"problem_solving":N,"red_flags":[],"strengths":[],"recommendation":"...","confidence":N,"evidence_summary":"..."}}}}'
+                '{"technical_rating":N,"skills_match":{"required":[],"matched":[],"missing":[],"match_percentage":N},"code_quality":"...","experience_depth":N,"communication":N,"problem_solving":N,"red_flags":[],"strengths":[],"recommendation":"...","confidence":N,"evidence_summary":"..."}'
             )
             llm_response = gl.nondet.exec_prompt(evaluation_prompt)
             cleaned = llm_response.replace("```json", "").replace("```", "").strip()
             return cleaned
 
         evaluation_json = gl.eq_principle.strict_eq(run_evaluation)
-        data = json.loads(evaluation_json)
-        self.app_tech_rating[application_id] = u256(int(data["technical_rating"]))
+        try:
+            data = json.loads(evaluation_json)
+        except Exception:
+            return "INVALID_EVALUATION"
+        if "technical_rating" not in data or "skills_match" not in data or "recommendation" not in data or "confidence" not in data:
+            return "INVALID_EVALUATION"
+
+        recommendation = str(data["recommendation"])
+        if recommendation not in ["STRONG_HIRE", "HIRE", "REVIEW", "NO_HIRE"]:
+            return "INVALID_RECOMMENDATION"
+
+        technical_rating = int(data["technical_rating"])
+        confidence = int(data["confidence"])
+        if technical_rating < 0 or technical_rating > 100 or confidence < 1 or confidence > 10:
+            return "INVALID_SCORE"
+
+        evaluation_fee = self.job_evaluation_fee[job_id]
+        current_balance = self.job_balance[job_id]
+        if evaluation_fee == u256(0):
+            return "ZERO_FEE"
+        if current_balance < evaluation_fee:
+            return "INSUFFICIENT_BALANCE"
+        new_balance = current_balance - evaluation_fee
+        self.job_balance[job_id] = new_balance
+
+        treasury_idx = self.treasury_count
+        self.treasury_recipients.append("platform")
+        self.treasury_amounts.append(evaluation_fee)
+        self.treasury_types.append("EVALUATION_FEE")
+        self.treasury_timestamps.append(u256(0))
+        self.treasury_count = treasury_idx + u256(1)
+
+        self.app_tech_rating[application_id] = u256(technical_rating)
         self.app_skills_match[application_id] = json.dumps(data["skills_match"], sort_keys=True, separators=(",", ":"))
         self.app_recommendation[application_id] = str(data["recommendation"])
         self.app_confidence[application_id] = u256(int(data["confidence"]))
         self.app_evaluation_json[application_id] = evaluation_json
         self.app_status[application_id] = "EVALUATED"
         self.app_evaluated_at[application_id] = u256(0)
-        self.app_challenge_deadline[application_id] = self.app_evaluated_at[application_id] + self.job_challenge_window[job_id]
         return evaluation_json
 
 
@@ -320,18 +378,9 @@ class MeritTrial(gl.Contract):
         current_status = self.app_status[application_id]
         if current_status != "EVALUATED":
             return "INVALID_STATUS"
-        challenge_deadline = self.app_challenge_deadline[application_id]
-        current_block = u256(0)
-        if current_block > challenge_deadline:
-            return "OUTSIDE_CHALLENGE_WINDOW"
 
-        challenge_idx = self.challenge_count
-        self.challenge_app_ids.append(application_id)
-        self.challenge_reasons.append(reason)
-        self.challenge_panel_verdicts.append("")
-        self.challenge_outcome.append("")
-        self.challenge_timestamps.append(u256(0))
-        self.challenge_count = challenge_idx + u256(1)
+        if len(reason) == 0:
+            return "NO_CHALLENGE_REASON"
 
         job_id = self.app_job_ids[application_id]
         job_requirements = self.job_requirements[job_id]
@@ -404,7 +453,7 @@ class MeritTrial(gl.Contract):
                 "URL: " + cover_letter_url + "\n"
                 + cover_letter_content + "\n\n"
                 "Based on your independent review, respond with ONLY this JSON:\n"
-                '{{{{"verdict":"UPHELD|OVERTURNED","technical_rating":N,"recommendation":"STRONG_HIRE|HIRE|REVIEW|NO_HIRE","confidence":N,"reasoning":"..."}}}}'
+                '{"verdict":"UPHELD|OVERTURNED","technical_rating":N,"recommendation":"STRONG_HIRE|HIRE|REVIEW|NO_HIRE","confidence":N,"reasoning":"..."}'
             )
             return gl.nondet.exec_prompt(prompt)
 
@@ -465,7 +514,7 @@ class MeritTrial(gl.Contract):
                 "URL: " + cover_letter_url + "\n"
                 + cover_letter_content + "\n\n"
                 "Based on your independent audit, respond with ONLY this JSON:\n"
-                '{{{{"verdict":"UPHELD|OVERTURNED","technical_rating":N,"recommendation":"STRONG_HIRE|HIRE|REVIEW|NO_HIRE","confidence":N,"reasoning":"..."}}}}'
+                '{"verdict":"UPHELD|OVERTURNED","technical_rating":N,"recommendation":"STRONG_HIRE|HIRE|REVIEW|NO_HIRE","confidence":N,"reasoning":"..."}'
             )
             return gl.nondet.exec_prompt(prompt)
 
@@ -526,7 +575,7 @@ class MeritTrial(gl.Contract):
                 "URL: " + cover_letter_url + "\n"
                 + cover_letter_content + "\n\n"
                 "Based on your independent assessment, respond with ONLY this JSON:\n"
-                '{{{{"verdict":"UPHELD|OVERTURNED","technical_rating":N,"recommendation":"STRONG_HIRE|HIRE|REVIEW|NO_HIRE","confidence":N,"reasoning":"..."}}}}'
+                '{"verdict":"UPHELD|OVERTURNED","technical_rating":N,"recommendation":"STRONG_HIRE|HIRE|REVIEW|NO_HIRE","confidence":N,"reasoning":"..."}'
             )
             return gl.nondet.exec_prompt(prompt)
 
@@ -534,9 +583,19 @@ class MeritTrial(gl.Contract):
         verdict_2_raw = gl.eq_principle.strict_eq(panelist_2)
         verdict_3_raw = gl.eq_principle.strict_eq(panelist_3)
 
-        verdict_1 = json.loads(verdict_1_raw)
-        verdict_2 = json.loads(verdict_2_raw)
-        verdict_3 = json.loads(verdict_3_raw)
+        try:
+            verdict_1 = json.loads(verdict_1_raw)
+            verdict_2 = json.loads(verdict_2_raw)
+            verdict_3 = json.loads(verdict_3_raw)
+        except Exception:
+            return "INVALID_PANEL_EVALUATION"
+
+        panel_verdicts_list = [verdict_1, verdict_2, verdict_3]
+        for panel_verdict in panel_verdicts_list:
+            if "verdict" not in panel_verdict or "technical_rating" not in panel_verdict or "recommendation" not in panel_verdict or "confidence" not in panel_verdict:
+                return "INVALID_PANEL_EVALUATION"
+            if str(panel_verdict["verdict"]) not in ["UPHELD", "OVERTURNED"]:
+                return "INVALID_VERDICT"
 
         overturned_count = u256(0)
         if str(verdict_1["verdict"]) == "OVERTURNED":
@@ -545,6 +604,13 @@ class MeritTrial(gl.Contract):
             overturned_count = overturned_count + u256(1)
         if str(verdict_3["verdict"]) == "OVERTURNED":
             overturned_count = overturned_count + u256(1)
+
+        challenge_idx = self.challenge_count
+        self.challenge_app_ids.append(application_id)
+        self.challenge_reasons.append(reason)
+        self.challenge_panel_verdicts.append("")
+        self.challenge_outcome.append("")
+        self.challenge_count = challenge_idx + u256(1)
 
         panel_verdicts = json.dumps([
             {"verdict": str(verdict_1["verdict"]), "technical_rating": int(verdict_1["technical_rating"]), "recommendation": str(verdict_1["recommendation"]), "confidence": int(verdict_1["confidence"])},
@@ -555,10 +621,15 @@ class MeritTrial(gl.Contract):
         self.challenge_panel_verdicts[challenge_idx] = panel_verdicts
 
         if overturned_count >= u256(2):
-            self.app_tech_rating[application_id] = u256(int(verdict_1["technical_rating"]))
-            self.app_recommendation[application_id] = str(verdict_1["recommendation"])
-            self.app_confidence[application_id] = u256(int(verdict_1["confidence"]))
-            self.app_evaluation_json[application_id] = verdict_1_raw
+            selected_verdict = verdict_1
+            if str(verdict_1["verdict"]) != "OVERTURNED":
+                selected_verdict = verdict_2
+            if str(verdict_2["verdict"]) != "OVERTURNED":
+                selected_verdict = verdict_3
+            self.app_tech_rating[application_id] = u256(int(selected_verdict["technical_rating"]))
+            self.app_recommendation[application_id] = str(selected_verdict["recommendation"])
+            self.app_confidence[application_id] = u256(int(selected_verdict["confidence"]))
+            self.app_evaluation_json[application_id] = json.dumps(selected_verdict, sort_keys=True, separators=(",", ":"))
             self.app_status[application_id] = "FINALIZED"
             self.challenge_outcome[challenge_idx] = "OVERTURNED"
         else:

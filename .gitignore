@@ -19,3 +19,6 @@ dist/
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Redundant Next.js config (using .ts version)
+next.config.js

@@ -7,6 +7,7 @@ import UseCasesSection from "@/components/sections/UseCasesSection";
 import TechSection from "@/components/sections/TechSection";
 import ComparisonSection from "@/components/sections/ComparisonSection";
 import BiasSection from "@/components/sections/BiasSection";
+import ContractFlowSection from "@/components/sections/ContractFlowSection";
 import CTASection from "@/components/sections/CTASection";
 import FAQSection from "@/components/sections/FAQSection";
 
@@ -22,6 +23,7 @@ export default function Home() {
       <TechSection />
       <ComparisonSection />
       <BiasSection />
+      <ContractFlowSection />
       <CTASection />
       <FAQSection />
     </>
